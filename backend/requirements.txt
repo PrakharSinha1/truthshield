@@ -4,5 +4,5 @@ python-dotenv
 groq
 qdrant-client
 pydantic
+torch --index-url https://download.pytorch.org/whl/cpu
 sentence-transformers
-torch
