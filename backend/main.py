@@ -28,23 +28,15 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Seed vector DB on every server start (in-memory mode)."""
-    seed_database()
-    print("✅ Qdrant seeded and ready")
+    try:
+        seed_database()
+        print("✅ Qdrant seeded and ready")
+    except Exception as e:
+        print(f"⚠️ Seed failed: {e} — continuing anyway")
 
 
 class AnalyzeRequest(BaseModel):
     text: str
-
-
-class AnalyzeResponse(BaseModel):
-    input_text:  str
-    category:    dict
-    verdict:     dict
-    explanation: str
-    flags:       list
-    evidence:    list
-    duration_ms: int
 
 
 @app.get("/")
@@ -57,38 +49,36 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze")
 def analyze(request: AnalyzeRequest):
     text = request.text.strip()
 
     if not text:
         raise HTTPException(status_code=400, detail="Input text cannot be empty.")
-
     if len(text) > 5000:
-        raise HTTPException(status_code=400, detail="Input text too long. Max 5000 characters.")
+        raise HTTPException(status_code=400, detail="Input too long. Max 5000 characters.")
 
     start = time.time()
 
     try:
-        category    = classify_input(text)
-        evidence    = collect_evidence(text, top_k=5)
+        category      = classify_input(text)
+        evidence      = collect_evidence(text, top_k=5)
         evidence_text = format_evidence_for_prompt(evidence)
-        specialist  = run_specialist(text, category["category"], evidence_text)
-        critic      = run_critic(text, specialist)
-        verdict     = run_decision(specialist, critic)
-        explanation = run_explainer(text, verdict, specialist, critic)
-
+        specialist    = run_specialist(text, category["category"], evidence_text)
+        critic        = run_critic(text, specialist)
+        verdict       = run_decision(specialist, critic)
+        explanation   = run_explainer(text, verdict, specialist, critic)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis pipeline error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
 
     duration_ms = int((time.time() - start) * 1000)
 
-    return AnalyzeResponse(
-        input_text  = text,
-        category    = category,
-        verdict     = verdict,
-        explanation = explanation,
-        flags       = specialist.get("flags", []),
-        evidence    = evidence[:3],
-        duration_ms = duration_ms,
-    )
+    return {
+        "input_text":  text,
+        "category":    category,
+        "verdict":     verdict,
+        "explanation": explanation,
+        "flags":       specialist.get("flags", []),
+        "evidence":    evidence[:3],
+        "duration_ms": duration_ms,
+    }
