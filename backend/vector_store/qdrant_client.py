@@ -1,13 +1,30 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from sentence_transformers import SentenceTransformer
+import hashlib
+import struct
 import uuid
 
 COLLECTION  = "truthshield_evidence"
-VECTOR_SIZE = 384
+VECTOR_SIZE = 128  # small vector, no ML model needed
 
-_embedder = SentenceTransformer("all-MiniLM-L6-v2")
 _client = QdrantClient(location=":memory:")
+
+
+def _text_to_vector(text: str) -> list:
+    """
+    Lightweight deterministic vector from text using hashing.
+    No ML model, no torch, no RAM issues.
+    """
+    vector = []
+    text_lower = text.lower()
+    for i in range(VECTOR_SIZE):
+        chunk = text_lower[i::VECTOR_SIZE] or str(i)
+        h = hashlib.md5((chunk + str(i)).encode()).digest()
+        val = struct.unpack('f', h[:4])[0]
+        # normalize to -1 to 1
+        val = (val % 2.0) - 1.0
+        vector.append(val)
+    return vector
 
 
 def init_collection(reset: bool = False):
@@ -24,7 +41,7 @@ def init_collection(reset: bool = False):
 
 
 def add_evidence(text: str, label: str, source: str = "manual"):
-    vector = _embedder.encode(text).tolist()
+    vector = _text_to_vector(text)
     _client.upsert(
         collection_name=COLLECTION,
         points=[
@@ -39,7 +56,7 @@ def add_evidence(text: str, label: str, source: str = "manual"):
 
 def search_similar(query: str, top_k: int = 5) -> list:
     try:
-        vector = _embedder.encode(query).tolist()
+        vector = _text_to_vector(query)
         results = _client.search(
             collection_name=COLLECTION,
             query_vector=vector,
@@ -58,15 +75,15 @@ def search_similar(query: str, top_k: int = 5) -> list:
 
 
 SEED_DATA = [
-    ("Earn 50,000 daily working from home. No experience needed. Apply now!", "job_scam"),
-    ("Urgent hiring! Data entry job from home. Salary 80,000 per month. No interview required.", "job_scam"),
-    ("We are hiring remote workers. Guaranteed 5,000 per day. Send your Aadhaar to apply.", "job_scam"),
-    ("Fake internship at Google India. Pay 2,000 registration fee to secure your slot.", "job_scam"),
+    ("Earn 50000 daily working from home. No experience needed. Apply now!", "job_scam"),
+    ("Urgent hiring! Data entry job from home. Salary 80000 per month. No interview required.", "job_scam"),
+    ("We are hiring remote workers. Guaranteed 5000 per day. Send your Aadhaar to apply.", "job_scam"),
+    ("Fake internship at Google India. Pay 2000 registration fee to secure your slot.", "job_scam"),
     ("Part-time job offer: Like YouTube videos and earn 500 per video. WhatsApp us.", "job_scam"),
     ("Congratulations! You have won 10 lakh in SBI lottery. Share your OTP to claim.", "scam"),
     ("Your KYC is expired. Click the link to update immediately or your account will be blocked.", "scam"),
     ("TRAI is blocking your number in 2 hours. Call this number immediately to appeal.", "scam"),
-    ("You have received a refund of 9,800. Enter your UPI PIN to receive the amount.", "scam"),
+    ("You have received a refund of 9800. Enter your UPI PIN to receive the amount.", "scam"),
     ("Dear customer, your Amazon order is stuck. Pay 49 customs fee via this link.", "scam"),
     ("Government bans all private banks in India starting next month.", "fake_news"),
     ("Scientists confirm 5G towers are spreading COVID-19 in urban areas.", "fake_news"),
